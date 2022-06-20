@@ -14,7 +14,7 @@ program test
     integer, allocatable :: sx(:)
     real, allocatable    :: vel(:,:), fonte(:), D(:,:), Im(:,:), Imt(:,:), Im_tmp(:,:)
 
-    integer :: order
+    integer :: order, ndevices
     type(pyplot) :: plt
 
 

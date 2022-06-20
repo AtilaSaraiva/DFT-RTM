@@ -1,4 +1,6 @@
 module mdle_adds
+    use openacc
+    use omp_lib
     implicit none
 
     contains
@@ -131,6 +133,7 @@ module mdle_adds
             integer ::  nzb, nxb, it, sz, sx, nb, nt, nz, nx, rsz, order, nw, iw, nw_i, nw_f
             real, dimension(:,:) :: csuav(nz,nx), scg(nt,nx), Im(nzb,nxb)
             real,dimension (:)     :: fonte(nt)
+            integer:: ndevices, tnum
 
             real, allocatable :: p0(:,:), p1(:,:), p2(:,:),cext(:,:), L(:,:), kr(:,:), ki(:,:)
             real, allocatable :: pr0(:,:), pr1(:,:), pr2(:,:), Lr(:,:)
@@ -186,33 +189,39 @@ module mdle_adds
                 end do
             end do
 
+            ndevices = acc_get_num_devices( acc_device_nvidia )
+
             do it = 1, nt
+                !$omp parallel num_threads(2) private(tnum)
+                tnum = omp_get_thread_num()
+                call acc_set_device_num(tnum, acc_device_nvidia)
+                if (tnum == 1) then
+                    call atenuacao (nxb,nzb,nb,p0, thread=1)
+                    call atenuacao (nxb,nzb,nb,p1, thread=1)
 
-                call atenuacao (nxb,nzb,nb,p0, thread=1)
-                call atenuacao (nxb,nzb,nb,p1, thread=1)
+                    call op_l(order,coef, nzb,nxb,dz,dx,p1,L, thread=1)
 
-                call op_l(order,coef, nzb,nxb,dz,dx,p1,L, thread=1)
+                    !$acc kernels async(1)
+                    p2 = 2*p1 - p0 + (dt**2)*(cext**2)*L
 
-                !$acc kernels async(1)
-                p2 = 2*p1 - p0 + (dt**2)*(cext**2)*L
+                    p2(sz,sx) = p2(sz,sx) + fonte(it)
+                    !$acc end kernels
+                else
+                    call atenuacao (nxb,nzb,nb,pr0, thread=2)
+                    call atenuacao (nxb,nzb,nb,pr1, thread=2)
 
-                p2(sz,sx) = p2(sz,sx) + fonte(it)
-                !$acc end kernels
+                    call op_l(order,coef, nzb,nxb,dz,dx,pr1,Lr, thread=2)
 
-                call atenuacao (nxb,nzb,nb,pr0, thread=2)
-                call atenuacao (nxb,nzb,nb,pr1, thread=2)
+                    !$acc kernels async(2)
+                    pr2 = 2*pr1 - pr0 + (dt**2)*(cext**2)*Lr
 
-                call op_l(order,coef, nzb,nxb,dz,dx,pr1,Lr, thread=2)
+                    pr2(rsz,nb+1:nx+nb) = pr2(rsz,nb+1:nx+nb) + scg(nt-it+1,:)
+                    !$acc end kernels
+                end if
 
-                !$acc kernels async(2)
-                pr2 = 2*pr1 - pr0 + (dt**2)*(cext**2)*Lr
-
-                pr2(rsz,nb+1:nx+nb) = pr2(rsz,nb+1:nx+nb) + scg(nt-it+1,:)
-                !$acc end kernels
-
-                !psr = 0. ; psi = 0. ; prr = 0. ; pri = 0.
-
+                !$omp end parallel
                 !$acc wait(1,2)
+                !psr = 0. ; psi = 0. ; prr = 0. ; pri = 0.
 
                 !$acc kernels
                 do iw = 1, nw
@@ -246,7 +255,7 @@ module mdle_adds
 
         subroutine atenuacao(nxb,nzb,nb,p2,thread)
             integer,intent(in) :: nxb, nzb, nb
-            real, intent(in)   :: p2(nzb,nxb)
+            real, intent(inout)   :: p2(nzb,nxb)
             integer            :: i, j, a
             integer, optional :: thread
 
