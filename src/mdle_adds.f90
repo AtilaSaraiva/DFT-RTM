@@ -153,10 +153,13 @@ module mdle_adds
             nw = (nw_f-nw_i) +1
 
             !nw = nt/2 + 1
+            allocate(cext(nzb,nxb))
+            call makevelextend(nz,nx,nzb,nxb,nb,csuav,cext)
+
+            !$acc enter data create(p0,p1,p2,pr0,pr1,pr2,psr,psi,prr,pri,w,kr,ki,L,Lr,coef) copyin(scg, cext)
 
             write(*,*) "nw", nw
 
-            allocate(cext(nzb,nxb))
             allocate(p0(nzb,nxb), p1(nzb,nxb), p2(nzb,nxb),L(nzb,nxb))
             allocate(pr0(nzb,nxb),pr1(nzb,nxb),pr2(nzb,nxb),Lr(nzb,nxb))
             allocate(coef(order+1))
@@ -164,9 +167,9 @@ module mdle_adds
             allocate(w(nw), kr(nw,nt), ki(nw,nt))
             allocate(psr(nzb,nxb, nw), psi(nzb,nxb,nw), prr(nzb,nxb, nw), pri(nzb,nxb, nw))
 
-            call makevelextend(nz,nx,nzb,nxb,nb,csuav,cext)
 
             call calc_coef(order, coef)
+
 
             !$acc kernels
             p0  =  0. ; p1  =  0. ; p2  =  0. ; L = 0. ; Im = 0.
@@ -188,6 +191,7 @@ module mdle_adds
                     ki(iw, it) = sin(w(iw)*(it-1)) ! Kernel parte imaginária
                 end do
             end do
+
 
             ndevices = acc_get_num_devices( acc_device_nvidia )
 
@@ -250,6 +254,8 @@ module mdle_adds
            deallocate (p0, p2, p1, L, cext, coef, w, kr, ki)
            deallocate(psr, psi, prr, pri)
            deallocate (pr0,pr1,pr2,Lr)
+
+           !$acc exit data delete(p0,p1,p2,pr0,pr1,pr2,psr,psi,prr,pri,w,kr,ki,L,Lr,coef,scg, cext) copyout(Im)
 
         end subroutine RTM_DFT
 
